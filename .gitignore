@@ -10,6 +10,7 @@ csv_output/
 *.tif
 *.TIF
 *.zip
+*.csv
 
 # Debug çıktıları
 *_debug.png
@@ -27,3 +28,5 @@ Termogram/
 Mareogram/
 Barograph/
 MicroBarograf-Osmanlica/
+
+Hackathon Katılımcı Rehberi.docx

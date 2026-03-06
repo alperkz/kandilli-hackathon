@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Veri dosyaları
+aktinograph/
+csv_output/
+*.tif
+*.TIF
+*.zip
+
+# Debug çıktıları
+*_debug.png
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+Veriler_H/
+Termogram/
+Mareogram/
+Barograph/
+MicroBarograf-Osmanlica/

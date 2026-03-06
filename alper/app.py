@@ -85,9 +85,12 @@ def load_all_data():
     try:
         wb_b = pd.read_excel("Veriler_H/Basınç/Basınç 1912-2018Kasim.xlsx", sheet_name=None, header=None)
         first_sheet = list(wb_b.keys())[0]
-        df_basinc = parse_matrix(wb_b[first_sheet], 0, 0, 2, 2)
+        df_basinc = parse_matrix(wb_b[first_sheet], 0, 0, 1, 1)
         df_basinc.columns = ['date', 'basinc']
-    except:
+        # 2015-2016 kalibrasyon kayması ve aykırı değerleri filtrele
+        df_basinc = df_basinc[(df_basinc['basinc'] >= 745) & (df_basinc['basinc'] <= 790)]
+        df_basinc = df_basinc[~df_basinc['date'].dt.year.isin([2015, 2016])]
+    except Exception as e:
         df_basinc = pd.DataFrame(columns=['date', 'basinc'])
 
     # Hepsini birleştir
@@ -171,6 +174,7 @@ with st.sidebar:
         "🌡️ Sıcaklık Analizi",
         "🌧️ Yağış Analizi",
         "💧 Nem Analizi",
+        "📊 Basınç Analizi",
         "🔥 İklim Değişikliği",
         "📅 Yıl Karşılaştırma",
         "🔮 Tahminleme",
@@ -1401,6 +1405,181 @@ elif page == "📸 Sayısallaştırma":
                         aspect='auto')
         fig.update_layout(template='plotly_dark', height=300)
         st.plotly_chart(fig, use_container_width=True)
+
+# ─────────────────────────────────────────────
+# SAYFA: BASINÇ ANALİZİ
+# ─────────────────────────────────────────────
+elif page == "📊 Basınç Analizi":
+    st.markdown("## 📊 Basınç Analizi (1912–2018)")
+    st.markdown("""
+    <div class="prediction-box">
+        <p style="color:#aaa">Kandilli Rasathanesi'nde 1912'den 2018'e kadar ölçülen yüzey atmosferik basıncı verileri.
+        <br><span style="color:#fd79a8">⚠️ Not: 2015–2016 yılları sistematik kalibrasyon kayması nedeniyle analizden çıkarılmıştır.</span></p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if 'basinc' not in df.columns or df['basinc'].dropna().empty:
+        st.error("Basınç verisi yüklenemedi. Lütfen `Veriler_H/Basınç/` klasörünü kontrol edin.")
+    else:
+        df_b = df[df['basinc'].notna() & (df['basinc'] > 0)].copy()
+        df_b_filt = df_b[(df_b['year'] >= yil_aralik[0]) & (df_b['year'] <= yil_aralik[1])]
+
+        # ── STAT KARTLARI ────────────────────────────
+        yillik_b = df_b_filt.groupby('year')['basinc'].mean().reset_index()
+        yillik_b = yillik_b.dropna()
+
+        if len(yillik_b) > 0:
+            ort_val   = yillik_b['basinc'].mean()
+            max_val   = yillik_b['basinc'].max()
+            min_val   = yillik_b['basinc'].min()
+            max_yr    = int(yillik_b.loc[yillik_b['basinc'].idxmax(), 'year'])
+            min_yr    = int(yillik_b.loc[yillik_b['basinc'].idxmin(), 'year'])
+            trend_val = yillik_b['basinc'].iloc[-1] - yillik_b['basinc'].iloc[0] if len(yillik_b) > 1 else 0
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Dönem Ortalaması", f"{ort_val:.2f} hPa")
+            c2.metric("En Yüksek Yıllık Ort.", f"{max_val:.2f} hPa", f"{max_yr}")
+            c3.metric("En Düşük Yıllık Ort.", f"{min_val:.2f} hPa", f"{min_yr}")
+            c4.metric("Dönem Değişimi", f"{trend_val:+.2f} hPa")
+
+        st.divider()
+
+        # ── TAB'LAR ──────────────────────────────────
+        tab1, tab2, tab3, tab4 = st.tabs(["📈 Yıllık Trend", "🗓️ Mevsimsel Döngü", "📊 On Yıllık Analiz", "⚡ Anomali"])
+
+        with tab1:
+            if len(yillik_b) > 0:
+                # 5 yıllık hareketli ortalama
+                yillik_b_sorted = yillik_b.sort_values('year')
+                yillik_b_sorted['mov_avg'] = yillik_b_sorted['basinc'].rolling(5, center=True, min_periods=1).mean()
+
+                y_min = yillik_b_sorted['basinc'].min()
+                y_max = yillik_b_sorted['basinc'].max()
+                y_pad = (y_max - y_min) * 0.3  # %30 padding
+
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=yillik_b_sorted['year'], y=yillik_b_sorted['basinc'],
+                    name='Yıllık Ort. (hPa)',
+                    mode='lines',
+                    line=dict(color='#fd79a8', width=1.5),
+                    fill='tonexty', fillcolor='rgba(253,121,168,0.08)'
+                ))
+                fig.add_trace(go.Scatter(
+                    x=yillik_b_sorted['year'], y=yillik_b_sorted['mov_avg'],
+                    name='5 Yıllık Hareketli Ort.',
+                    line=dict(color='#fdcb6e', width=2.5)
+                ))
+                if len(yillik_b_sorted) > 3:
+                    z = np.polyfit(yillik_b_sorted['year'], yillik_b_sorted['basinc'], 1)
+                    p = np.poly1d(z)
+                    fig.add_trace(go.Scatter(
+                        x=yillik_b_sorted['year'], y=p(yillik_b_sorted['year']),
+                        name=f'Lineer Trend ({z[0]*10:.3f} hPa/10yıl)',
+                        line=dict(color='white', dash='dash', width=1.5)
+                    ))
+                fig.update_layout(
+                    title='Yıllık Ortalama Basınç Trendi (1912–2018)',
+                    template='plotly_dark', height=420,
+                    xaxis_title='Yıl', yaxis_title='hPa',
+                    hovermode='x unified',
+                    legend=dict(orientation='h', y=1.08),
+                    yaxis=dict(range=[y_min - y_pad, y_max + y_pad])
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                st.caption("⚠️ 2015–2016 yılları ~10 hPa sistemik kaymadan dolayı çıkarıldı.")
+
+        with tab2:
+            aylik_b = df_b_filt.groupby('month')['basinc'].mean().reset_index()
+            aylik_b['ay_isim'] = aylik_b['month'].map(AY_ISIM)
+
+            fig2 = go.Figure()
+            colors_month = ['#74b9ff' if m in [12,1,2] else
+                            '#fdcb6e' if m in [6,7,8] else
+                            '#a29bfe' for m in aylik_b['month']]
+            fig2.add_bar(
+                x=aylik_b['ay_isim'], y=aylik_b['basinc'].round(2),
+                marker_color=colors_month,
+                text=aylik_b['basinc'].round(2),
+                textposition='outside'
+            )
+            fig2.update_layout(
+                title='Aylık Ortalama Basınç (Tüm Yıllar)',
+                template='plotly_dark', height=380,
+                xaxis_title='Ay', yaxis_title='hPa',
+                showlegend=False,
+                yaxis=dict(range=[aylik_b['basinc'].min() - 1, aylik_b['basinc'].max() + 1])
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+            st.info("🔵 Kış · 🟣 Geçiş · 🟡 Yaz — Kış aylarında basınç daha yüksek, yaz aylarında daha düşük.")
+
+        with tab3:
+            sel_ay = st.selectbox("Ay Seçin", list(AY_ISIM.values()), key='basinc_ay')
+            ay_no = {v: k for k, v in AY_ISIM.items()}[sel_ay]
+
+            df_ay = df_b_filt[df_b_filt['month'] == ay_no].copy()
+            df_ay['decade'] = (df_ay['year'] // 10) * 10
+            decade_b = df_ay.groupby('decade')['basinc'].mean().reset_index()
+            decade_b['decade_label'] = decade_b['decade'].astype(str) + "'ler"
+
+            decade_b_global = decade_b['basinc'].mean()
+            decade_b['color'] = decade_b['basinc'].apply(
+                lambda v: '#ff6b6b' if v >= decade_b_global else '#74b9ff'
+            )
+
+            fig3 = go.Figure()
+            fig3.add_bar(
+                x=decade_b['decade_label'], y=decade_b['basinc'].round(2),
+                marker_color=decade_b['color'],
+                text=decade_b['basinc'].round(2),
+                textposition='outside'
+            )
+            fig3.add_hline(
+                y=decade_b_global, line_dash='dot', line_color='white', opacity=0.5,
+                annotation_text=f'Ort: {decade_b_global:.2f} hPa'
+            )
+            fig3.update_layout(
+                title=f'{sel_ay} Ayı — On Yıllık Ortalama Basınç',
+                template='plotly_dark', height=380,
+                xaxis_title='On Yıl', yaxis_title='hPa',
+                showlegend=False,
+                yaxis=dict(range=[decade_b['basinc'].min() - 1, decade_b['basinc'].max() + 1])
+            )
+            st.plotly_chart(fig3, use_container_width=True)
+
+        with tab4:
+            if len(yillik_b) > 0:
+                global_mean = yillik_b['basinc'].mean()
+                yillik_b['anomali'] = yillik_b['basinc'] - global_mean
+
+                fig4 = go.Figure()
+                pos = yillik_b[yillik_b['anomali'] >= 0]
+                neg = yillik_b[yillik_b['anomali'] < 0]
+                fig4.add_bar(
+                    x=pos['year'], y=pos['anomali'].round(3),
+                    marker_color='#fd79a8', name='Pozitif Anomali'
+                )
+                fig4.add_bar(
+                    x=neg['year'], y=neg['anomali'].round(3),
+                    marker_color='#74b9ff', name='Negatif Anomali'
+                )
+                fig4.add_hline(y=0, line_dash='solid', line_color='white', opacity=0.3)
+                fig4.update_layout(
+                    title=f'Yıllık Basınç Anomalisi (Ref. ortalama = {global_mean:.2f} hPa)',
+                    template='plotly_dark', height=400,
+                    xaxis_title='Yıl', yaxis_title='Anomali (hPa)',
+                    barmode='relative', hovermode='x unified'
+                )
+                st.plotly_chart(fig4, use_container_width=True)
+
+                # Özet istatistikler
+                col1, col2, col3 = st.columns(3)
+                col1.metric("En Büyük + Anomali", f"+{yillik_b['anomali'].max():.2f} hPa",
+                           f"{int(yillik_b.loc[yillik_b['anomali'].idxmax(), 'year'])}")
+                col2.metric("En Büyük − Anomali", f"{yillik_b['anomali'].min():.2f} hPa",
+                           f"{int(yillik_b.loc[yillik_b['anomali'].idxmin(), 'year'])}")
+                pos_count = (yillik_b['anomali'] > 0).sum()
+                col3.metric("Pozitif Anomali Yıl", f"{pos_count} / {len(yillik_b)}")
 
 # Footer
 st.divider()
